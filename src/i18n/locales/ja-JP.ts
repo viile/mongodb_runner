@@ -65,6 +65,7 @@ const messages: Messages = {
 
   editor: {
     title: 'クエリエディタ',
+    placeholder: '// 左でコレクションを選ぶと例が自動入力されます\n// 続けて Cmd/Ctrl + Enter で実行',
     format: '整形',
     run: '実行',
     stop: '停止',

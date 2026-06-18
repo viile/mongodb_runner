@@ -65,6 +65,7 @@ const messages: Messages = {
 
   editor: {
     title: 'Query editor',
+    placeholder: '// Pick a collection on the left to auto-fill an example\n// Then press Cmd/Ctrl + Enter to run',
     format: 'Format',
     run: 'Run',
     stop: 'Stop',

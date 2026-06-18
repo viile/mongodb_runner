@@ -65,6 +65,7 @@ const messages: Messages = {
 
   editor: {
     title: '쿼리 편집기',
+    placeholder: '// 왼쪽에서 컬렉션을 선택하면 예제가 자동 입력됩니다\n// 그런 다음 Cmd/Ctrl + Enter로 실행',
     format: '포맷',
     run: '실행',
     stop: '중지',

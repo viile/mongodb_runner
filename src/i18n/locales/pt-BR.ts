@@ -65,6 +65,7 @@ const messages: Messages = {
 
   editor: {
     title: 'Editor de consulta',
+    placeholder: '// Escolha uma coleção à esquerda para preencher um exemplo\n// Depois Cmd/Ctrl + Enter para executar',
     format: 'Formatar',
     run: 'Executar',
     stop: 'Parar',

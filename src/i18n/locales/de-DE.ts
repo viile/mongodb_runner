@@ -65,6 +65,7 @@ const messages: Messages = {
 
   editor: {
     title: 'Abfrage-Editor',
+    placeholder: '// Wähle links eine Collection für ein Beispiel\n// Dann Cmd/Ctrl + Enter zum Ausführen',
     format: 'Formatieren',
     run: 'Ausführen',
     stop: 'Stop',

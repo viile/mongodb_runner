@@ -1,14 +1,14 @@
 # MongoDB Runner
 
-一个**纯本地**的 MongoDB 桌面客户端。前端用 Vue 3 + Element Plus，后端用 **Tauri (Rust)** 直接调用官方 mongodb 驱动 —— **不需要任何代理 server**，应用关掉就什么都不留。
+> 🌐 **中文** · [English](./README.en.md)
 
-代码组织借鉴 [`curl_display`](../curl_display)；LLM 接入参考 [`git_commit.py`](../../php/v-game-api/tools/git_commit.py)（OpenAI 兼容 + cursor-agent 兜底）。
+一个**纯本地**的 MongoDB 桌面客户端。前端用 Vue 3 + Element Plus，后端用 **Tauri (Rust)** 直接调用官方 mongodb 驱动 —— **不需要任何代理 server**，应用关掉就什么都不留。
 
 ## 布局
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  Header: 品牌名 / 当前连接 / 主题切换                       │
+│  Header: 品牌名 / 当前连接 / 语言 / 主题切换                │
 ├──────────────┬─────────────────────────────┬───────────────┤
 │              │ Query Editor (db.users.find)│               │
 │              │     · Run / Stop            │               │
@@ -29,7 +29,7 @@
 
 | 层 | 用到的东西 |
 |---|---|
-| UI | Vue 3 + Vite + TypeScript + Element Plus |
+| UI | Vue 3 + Vite + TypeScript + Element Plus + vue-i18n |
 | Shell | **Tauri 2** (Rust + 系统 WebView，无 Electron 体积) |
 | MongoDB | 官方 [`mongodb`](https://crates.io/crates/mongodb) Rust 驱动 + [`bson`](https://crates.io/crates/bson)（EJSON） |
 | LLM | OpenAI 兼容 `/v1/chat/completions`（reqwest），兜底走本地 `cursor-agent` CLI |
@@ -126,6 +126,13 @@ db.users.deleteMany({ "expired": true })
 LLM 自动带上当前数据库 / 集合 / 一份采样文档作为 schema 提示，生成的命令会贴合你的数据结构。
 检测到命令时可以「填入编辑器」或「直接执行」。
 
+### 5. 主题 & 语言
+
+右上角 Header 提供：
+
+- **🌐 语言切换器** — 内置 10 种语言（zh-CN / zh-TW / en-US / ja-JP / ko-KR / fr-FR / de-DE / es-ES / pt-BR / ru-RU），选择会持久化到 localStorage，Element Plus 内置组件文案同步切换。
+- **🎨 主题切换器** — 浅色 / 深色 / 跟随系统三档；选「跟随系统」时还会在按钮上显示一个 `L` / `D` 小角标指示当前实际生效的颜色。
+
 ## 目录结构
 
 ```
@@ -133,8 +140,9 @@ mongodb_runner/
 ├── src/                          # Vue 前端
 │   ├── App.vue                   # 三栏布局
 │   ├── api/{mongo,llm}.ts        # 通过 @tauri-apps/api/core 的 invoke
-│   ├── components/               # Sidebar / QueryEditor / ResultPanel / JsonTreeView / ChatPanel ...
+│   ├── components/               # Sidebar / QueryEditor / ResultPanel / JsonTreeView / ChatPanel / LanguageSwitcher / ThemeSwitcher
 │   ├── composables/              # useConnections / useHistory / useChat / useTheme
+│   ├── i18n/                     # vue-i18n + 10 个语言包
 │   └── styles/global.css
 ├── src-tauri/                    # Rust 后端
 │   ├── Cargo.toml

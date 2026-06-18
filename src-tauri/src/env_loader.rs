@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-fn parse_env_file(path: &PathBuf) -> HashMap<String, String> {
+pub fn parse_env_file(path: &PathBuf) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let Ok(content) = std::fs::read_to_string(path) else {
         return map;
@@ -39,6 +39,10 @@ fn parse_env_file(path: &PathBuf) -> HashMap<String, String> {
         }
     }
     map
+}
+
+pub fn config_paths() -> Vec<PathBuf> {
+    collect_config_paths()
 }
 
 fn collect_config_paths() -> Vec<PathBuf> {

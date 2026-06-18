@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 import { chatWithLLM, generateMongoCommand, getLLMStatus, type LLMSchema } from '../api/llm';
 import { sampleDocuments } from '../api/mongo';
 import { useChat } from '../composables/useChat';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   uri: string | null;
@@ -25,12 +28,8 @@ const llmInfo = ref<string>('');
 
 const scrollAreaRef = ref<HTMLElement | null>(null);
 
-const QUICK_PROMPTS = [
-  '统计每个 role 的用户数量',
-  '查找最近 7 天注册的活跃用户，按 createdAt 倒序',
-  '导出 status 为 pending 且 priority >= 3 的工单',
-  '聚合每天的下单总额（最近 30 天）',
-];
+const QUICK_PROMPT_KEYS = ['chat.quick1', 'chat.quick2', 'chat.quick3', 'chat.quick4'] as const;
+const quickPrompts = computed(() => QUICK_PROMPT_KEYS.map((k) => t(k)));
 
 onMounted(async () => {
   try {
@@ -42,11 +41,11 @@ onMounted(async () => {
       if (oai) llmInfo.value = `OpenAI · ${oai.model}`;
       else if (cur) llmInfo.value = `cursor-agent · ${cur.model || 'default'}`;
     } else {
-      llmInfo.value = '未配置 LLM。设置 OPENAI_API_KEY 后重启即可启用';
+      llmInfo.value = t('chat.statusNotConfigured');
     }
   } catch {
     llmAvailable.value = false;
-    llmInfo.value = '无法读取 LLM 状态';
+    llmInfo.value = t('chat.statusCantRead');
   }
   scrollToBottom();
 });
@@ -98,12 +97,14 @@ async function sendMessage(rawInput?: string) {
     if (r.ok && r.reply) {
       chat.addAssistant(r.reply);
     } else {
-      chat.addAssistant(`(LLM 返回失败: ${r.error || '未知错误'})`);
-      ElMessage.error(r.error || 'LLM 调用失败');
+      const err = r.error || '';
+      chat.addAssistant(t('chat.replyFailed', { error: err }));
+      ElMessage.error(err || 'LLM error');
     }
   } catch (e: any) {
-    chat.addAssistant(`(请求异常: ${e?.message || String(e)})`);
-    ElMessage.error(e?.message || String(e));
+    const err = e?.message || String(e);
+    chat.addAssistant(t('chat.requestException', { error: err }));
+    ElMessage.error(err);
   } finally {
     loading.value = false;
   }
@@ -112,7 +113,7 @@ async function sendMessage(rawInput?: string) {
 async function generateFromPrompt() {
   const text = input.value.trim();
   if (!text) {
-    ElMessage.warning('请输入需求');
+    ElMessage.warning(t('chat.needInput'));
     return;
   }
   if (loading.value) return;
@@ -123,14 +124,16 @@ async function generateFromPrompt() {
     const schema = await buildSchema();
     const r = await generateMongoCommand(text, schema);
     if (r.ok && r.command) {
-      chat.addAssistant(`生成的命令：\n\n\`\`\`js\n${r.command}\n\`\`\``);
+      chat.addAssistant(`${t('chat.generated')}\n\n\`\`\`js\n${r.command}\n\`\`\``);
     } else {
-      chat.addAssistant(`(生成失败: ${r.error || '未知错误'})`);
-      ElMessage.error(r.error || 'LLM 调用失败');
+      const err = r.error || '';
+      chat.addAssistant(t('chat.generateFailed', { error: err }));
+      ElMessage.error(err || 'LLM error');
     }
   } catch (e: any) {
-    chat.addAssistant(`(请求异常: ${e?.message || String(e)})`);
-    ElMessage.error(e?.message || String(e));
+    const err = e?.message || String(e);
+    chat.addAssistant(t('chat.requestException', { error: err }));
+    ElMessage.error(err);
   } finally {
     loading.value = false;
   }
@@ -166,31 +169,28 @@ function renderContent(text: string): string {
 <template>
   <div class="chat-panel">
     <div class="chat-head">
-      <span class="title">🤖 AI 助手</span>
+      <span class="title">🤖 {{ t('chat.title') }}</span>
       <span :class="['status', llmAvailable ? 'ok' : 'off']" :title="llmInfo">
-        {{ llmAvailable === null ? '...' : llmAvailable ? llmInfo : '未启用' }}
+        {{ llmAvailable === null ? '...' : llmAvailable ? llmInfo : t('chat.disabled') }}
       </span>
       <div class="spacer" />
-      <button class="ic-btn" :disabled="!hasMessages" title="清空对话" @click="chat.clear()">
+      <button class="ic-btn" :disabled="!hasMessages" :title="t('chat.clearTitle')" @click="chat.clear()">
         🗑
       </button>
     </div>
 
     <div ref="scrollAreaRef" class="messages">
       <div v-if="!hasMessages" class="welcome">
-        <p class="hi">问 AI 帮你生成 MongoDB 查询</p>
-        <p class="sub">
-          说出你想要的数据，例如：「找出今天注册且未付费的用户」。
-          回车发送（自由对话）；⌘/Ctrl + 回车（强约束生成命令）。
-        </p>
+        <p class="hi">{{ t('chat.welcomeTitle') }}</p>
+        <p class="sub">{{ t('chat.welcomeSub') }}</p>
         <div class="quick-list">
-          <button v-for="(p, i) in QUICK_PROMPTS" :key="i" class="quick" @click="pickQuick(p)">
+          <button v-for="(p, i) in quickPrompts" :key="i" class="quick" @click="pickQuick(p)">
             {{ p }}
           </button>
         </div>
         <div class="ctx-info">
-          <div>当前数据库: <span class="mono">{{ database || '(未选择)' }}</span></div>
-          <div>默认集合: <span class="mono">{{ collection || '(未选择)' }}</span></div>
+          <div>{{ t('chat.ctxDb') }}: <span class="mono">{{ database || t('chat.ctxNone') }}</span></div>
+          <div>{{ t('chat.ctxCol') }}: <span class="mono">{{ collection || t('chat.ctxNone') }}</span></div>
         </div>
       </div>
 
@@ -201,18 +201,18 @@ function renderContent(text: string): string {
           :class="['msg', m.role]"
         >
           <div class="role-line">
-            <span class="role-tag">{{ m.role === 'user' ? '你' : 'AI' }}</span>
+            <span class="role-tag">{{ m.role === 'user' ? t('chat.roleUser') : t('chat.roleAi') }}</span>
           </div>
           <div class="bubble" v-html="renderContent(m.content)" />
           <div v-if="m.role === 'assistant' && m.command" class="cmd-actions">
-            <span class="cmd-label">检测到可执行命令:</span>
-            <button class="cmd-btn" @click="emit('use-command', m.command!)">填入编辑器</button>
-            <button class="cmd-btn primary" @click="emit('run-command', m.command!)">直接执行</button>
+            <span class="cmd-label">{{ t('chat.cmdDetected') }}</span>
+            <button class="cmd-btn" @click="emit('use-command', m.command!)">{{ t('chat.cmdUse') }}</button>
+            <button class="cmd-btn primary" @click="emit('run-command', m.command!)">{{ t('chat.cmdRun') }}</button>
           </div>
         </div>
         <div v-if="loading" class="msg assistant">
           <div class="role-line">
-            <span class="role-tag">AI</span>
+            <span class="role-tag">{{ t('chat.roleAi') }}</span>
           </div>
           <div class="bubble typing">
             <span /><span /><span />
@@ -225,22 +225,22 @@ function renderContent(text: string): string {
       <div class="opts">
         <label class="opt">
           <input v-model="includeSample" type="checkbox" />
-          采样文档作为 schema 提示
+          {{ t('chat.optSampleSchema') }}
         </label>
       </div>
       <textarea
         v-model="input"
         class="input mono"
-        placeholder="说出你想查询的数据……  Enter 对话，⌘/Ctrl + Enter 直接生成命令"
+        :placeholder="t('chat.inputPh')"
         rows="3"
         @keydown="onKeydown"
       />
       <div class="actions">
         <button class="t-btn" :disabled="loading || !input.trim()" @click="sendMessage()">
-          💬 对话
+          {{ t('chat.btnChat') }}
         </button>
         <button class="t-btn primary" :disabled="loading || !input.trim()" @click="generateFromPrompt">
-          ⚡ 生成命令
+          {{ t('chat.btnGenerate') }}
         </button>
       </div>
     </div>

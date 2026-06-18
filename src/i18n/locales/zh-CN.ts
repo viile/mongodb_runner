@@ -66,6 +66,7 @@ const messages = {
 
   editor: {
     title: '查询编辑器',
+    placeholder: '// 选择左侧的集合即可自动填入示例\n// 然后按 Cmd/Ctrl + Enter 执行',
     format: '格式化',
     run: '执行',
     stop: '停止',

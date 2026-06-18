@@ -65,6 +65,7 @@ const messages: Messages = {
 
   editor: {
     title: 'Éditeur de requête',
+    placeholder: '// Choisissez une collection à gauche pour pré-remplir un exemple\n// Puis Cmd/Ctrl + Entrée pour exécuter',
     format: 'Formater',
     run: 'Exécuter',
     stop: 'Arrêter',

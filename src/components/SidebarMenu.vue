@@ -55,10 +55,14 @@ async function refreshDatabases() {
   try {
     const r = await listDatabases(c.uri);
     if (r.ok) {
-      databases.value = (r.databases || []).filter((d) => !['admin', 'config', 'local'].includes(d.name));
-      // 也允许展示系统库，但放在末尾
-      const sys = (r.databases || []).filter((d) => ['admin', 'config', 'local'].includes(d.name));
-      databases.value = [...databases.value, ...sys];
+      const all = r.databases || [];
+      // 普通库放前面、系统库（admin/config/local）放末尾；每一段内部按名字升序
+      const byName = (a: MongoDatabase, b: MongoDatabase) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      const isSys = (d: MongoDatabase) => ['admin', 'config', 'local'].includes(d.name);
+      const userDbs = all.filter((d) => !isSys(d)).sort(byName);
+      const sysDbs = all.filter(isSys).sort(byName);
+      databases.value = [...userDbs, ...sysDbs];
     } else {
       ElMessage.error(t('sidebar.listDbFailed', { error: r.error || '' }));
     }
@@ -82,7 +86,9 @@ async function toggleDatabase(dbName: string) {
   try {
     const r = await listCollections(c.uri, dbName);
     if (r.ok) {
-      collections.value[dbName] = (r.collections || []).filter((c) => !c.name.startsWith('system.'));
+      collections.value[dbName] = (r.collections || [])
+        .filter((c) => !c.name.startsWith('system.'))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     } else {
       ElMessage.error(t('sidebar.listColFailed', { error: r.error || '' }));
     }

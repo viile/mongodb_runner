@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 import JsonTreeView from './JsonTreeView.vue';
 import type { ExecuteResult } from '../api/mongo';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   result: ExecuteResult | null;
@@ -71,9 +74,9 @@ function cellPreview(val: unknown): string {
 async function copy(text: string) {
   try {
     await navigator.clipboard.writeText(text);
-    ElMessage.success('已复制');
+    ElMessage.success(t('result.copied'));
   } catch {
-    ElMessage.error('复制失败');
+    ElMessage.error(t('result.copyFailed'));
   }
 }
 
@@ -95,48 +98,48 @@ watch(
     <div class="toolbar">
       <template v-if="hasResult">
         <span :class="['status', isOk ? 'ok' : 'err']">
-          {{ isOk ? '✓' : '✗' }} {{ isOk ? 'OK' : 'ERROR' }}
+          {{ isOk ? '✓' : '✗' }} {{ isOk ? t('result.statusOk') : t('result.statusErr') }}
         </span>
         <span v-if="props.result?.collection" class="meta mono">
           {{ props.result.database }}.{{ props.result.collection }}.{{ props.result.operation }}()
         </span>
         <span v-if="typeof props.result?.count === 'number'" class="meta">
-          {{ props.result.count }} docs
+          {{ t('result.docs', { n: props.result.count }) }}
         </span>
-        <span v-if="props.result?.truncated" class="meta warn">已截断到 limit</span>
+        <span v-if="props.result?.truncated" class="meta warn">{{ t('result.truncated') }}</span>
         <span v-if="typeof props.result?.elapsedMs === 'number'" class="meta">
           {{ props.result.elapsedMs }}ms
         </span>
       </template>
       <template v-else>
-        <span class="meta">{{ loading ? '执行中...' : '尚无结果' }}</span>
+        <span class="meta">{{ loading ? t('result.running') : t('result.empty') }}</span>
       </template>
       <div class="spacer" />
       <template v-if="hasResult && isOk">
         <div class="view-tabs">
-          <button :class="['vt', { active: view === 'tree' }]" @click="view = 'tree'">树形</button>
-          <button :class="['vt', { active: view === 'raw' }]" @click="view = 'raw'">原文</button>
+          <button :class="['vt', { active: view === 'tree' }]" @click="view = 'tree'">{{ t('result.viewTree') }}</button>
+          <button :class="['vt', { active: view === 'raw' }]" @click="view = 'raw'">{{ t('result.viewRaw') }}</button>
           <button v-if="isDocList" :class="['vt', { active: view === 'table' }]" @click="view = 'table'">
-            表格
+            {{ t('result.viewTable') }}
           </button>
         </div>
-        <button class="ic-btn" title="复制 JSON" @click="copy(rawText)">⧉ 复制</button>
+        <button class="ic-btn" :title="t('result.copyJson')" @click="copy(rawText)">{{ t('result.copy') }}</button>
       </template>
     </div>
 
     <div class="body">
       <div v-if="loading" class="placeholder">
         <div class="loading-dot" />
-        <span>正在查询 MongoDB...</span>
+        <span>{{ t('result.queryingLabel') }}</span>
       </div>
 
       <div v-else-if="!hasResult" class="placeholder">
         <span class="hint-icon">🍃</span>
-        <p>左侧选择集合后写命令，按 ⌘/Ctrl + Enter 执行</p>
+        <p>{{ t('result.emptyHint') }}</p>
       </div>
 
       <div v-else-if="!isOk" class="error-box">
-        <strong>查询失败</strong>
+        <strong>{{ t('result.errorTitle') }}</strong>
         <pre>{{ props.result?.error }}</pre>
       </div>
 

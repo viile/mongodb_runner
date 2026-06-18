@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   modelValue: string;
@@ -127,20 +130,20 @@ function splitArgs(s: string): string[] {
 <template>
   <div class="query-editor">
     <div class="toolbar">
-      <span class="title">查询编辑器</span>
+      <span class="title">{{ t('editor.title') }}</span>
       <span class="kbd">⌘/Ctrl + Enter</span>
       <div class="spacer" />
-      <button class="t-btn" :disabled="loading" @click="format">格式化</button>
+      <button class="t-btn" :disabled="loading" @click="format">{{ t('editor.format') }}</button>
       <button
         v-if="!loading"
         class="t-btn run"
         :disabled="!canRun"
-        :title="canRun ? '执行' : '请先选择连接和数据库'"
+        :title="canRun ? t('editor.runTooltip') : t('editor.cantRunTooltip')"
         @click="emit('run')"
       >
-        ▶ 执行
+        ▶ {{ t('editor.run') }}
       </button>
-      <button v-else class="t-btn stop" @click="emit('stop')">■ 停止</button>
+      <button v-else class="t-btn stop" @click="emit('stop')">■ {{ t('editor.stop') }}</button>
     </div>
     <div class="editor-body">
       <div class="gutter">

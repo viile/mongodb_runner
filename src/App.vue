@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useI18n } from 'vue-i18n';
 import SidebarMenu from './components/SidebarMenu.vue';
@@ -20,7 +20,19 @@ const history = useHistory();
 const currentDatabase = ref<string | null>(null);
 const currentCollection = ref<string | null>(null);
 
-const command = ref<string>('// 选择左侧的集合即可自动填入示例\n// 然后按 Cmd/Ctrl + Enter 执行');
+/**
+ * 初始命令是「占位说明」。语言切换时若用户还没动过它（还等于旧 placeholder），
+ * 就同步切到新语言；只要用户改过任何字符，就尊重用户输入，不再覆盖。
+ */
+const command = ref<string>(t('editor.placeholder'));
+let lastPlaceholder = command.value;
+watch(
+  () => t('editor.placeholder'),
+  (next) => {
+    if (command.value === lastPlaceholder) command.value = next;
+    lastPlaceholder = next;
+  }
+);
 const loading = ref(false);
 const result = ref<ExecuteResult | null>(null);
 /**

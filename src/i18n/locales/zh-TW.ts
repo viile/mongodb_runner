@@ -65,6 +65,7 @@ const messages: Messages = {
 
   editor: {
     title: '查詢編輯器',
+    placeholder: '// 選擇左側的集合即可自動填入範例\n// 然後按 Cmd/Ctrl + Enter 執行',
     format: '格式化',
     run: '執行',
     stop: '停止',
