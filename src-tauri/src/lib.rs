@@ -5,6 +5,7 @@
 //!   mongo_list_databases(uri)                       -> { ok, databases }
 //!   mongo_list_collections(uri, database)           -> { ok, collections }
 //!   mongo_sample_documents(uri, database, col, size) -> { ok, docs }
+//!   mongo_impact_estimate(uri, database, command)    -> ImpactInfo
 //!   mongo_execute(uri, database, command, limit?)    -> ExecuteResult (EJSON relaxed)
 //!
 //!   llm_status(profile?)                            -> { ok, available, providers|active }
@@ -40,6 +41,7 @@ pub fn run() {
             mongo::mongo_list_databases,
             mongo::mongo_list_collections,
             mongo::mongo_sample_documents,
+            mongo::mongo_impact_estimate,
             mongo::mongo_execute,
             llm::llm_status,
             llm::llm_generate,

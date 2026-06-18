@@ -60,6 +60,41 @@ export async function listCollections(uri: string, database: string) {
   );
 }
 
+export type ImpactAffectKind =
+  | 'read'
+  | 'insert'
+  | 'updateSingle'
+  | 'updateMulti'
+  | 'deleteSingle'
+  | 'deleteMulti'
+  | 'replaceSingle'
+  | 'unknown';
+
+export type ImpactDangerLevel = 'safe' | 'caution' | 'danger';
+
+export interface ImpactInfo {
+  ok: boolean;
+  operation: string;
+  collection: string;
+  database: string;
+  isWrite: boolean;
+  affectKind: ImpactAffectKind;
+  /** 写操作 filter 命中的文档数（empty filter 用 estimatedDocumentCount 提速） */
+  matchedEstimate: number | null;
+  /** insertOne / insertMany 的插入条数 */
+  insertCount: number | null;
+  /** 最大可能受影响文档数 */
+  affectedMax: number | null;
+  dangerLevel: ImpactDangerLevel;
+  /** 顶层 filter 的 EJSON 预览（最多 200 字符） */
+  filterPreview: string | null;
+  emptyFilter: boolean;
+}
+
+export async function estimateImpact(uri: string, database: string, command: string) {
+  return ipc<ImpactInfo>('mongo_impact_estimate', { uri, database, command });
+}
+
 export async function sampleDocuments(
   uri: string,
   database: string,

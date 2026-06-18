@@ -94,6 +94,23 @@ export function useChat() {
     return entry;
   }
 
+  /**
+   * 系统提示型消息（执行影响评估、成功摘要、取消提示等），
+   * 在 UI 上用淡色卡片显示；发给 LLM 时会被过滤掉，不污染上下文。
+   */
+  function addSystem(content: string): ChatMessageEntry {
+    const entry: ChatMessageEntry = {
+      id: safeUUID(),
+      role: 'system',
+      content,
+      timestamp: Date.now(),
+    };
+    messages.value.push(entry);
+    trim();
+    persist();
+    return entry;
+  }
+
   function trim() {
     if (messages.value.length > MAX_TURNS * 2) {
       messages.value = messages.value.slice(-MAX_TURNS * 2);
@@ -114,6 +131,7 @@ export function useChat() {
     messages,
     addUser,
     addAssistant,
+    addSystem,
     clear,
     remove,
   };

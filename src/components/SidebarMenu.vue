@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useI18n } from 'vue-i18n';
 import ConnectionDialog from './ConnectionDialog.vue';
@@ -7,6 +7,7 @@ import LLMConfig from './LLMConfig.vue';
 import { useConnections, type MongoConnection } from '../composables/useConnections';
 import { useHistory, type HistoryItem } from '../composables/useHistory';
 import { useLLMProfiles } from '../composables/useLLMProfiles';
+import { useTreeKeyNav, type TreeFlatItem } from '../composables/useTreeKeyNav';
 import { listCollections, listDatabases, type MongoCollection, type MongoDatabase } from '../api/mongo';
 
 const { t } = useI18n();
@@ -103,6 +104,87 @@ async function toggleDatabase(dbName: string) {
 function pickCollection(db: string, col: string) {
   emit('pick-collection', { database: db, collection: col });
 }
+
+/* ---------- 键盘导航（type-to-jump、↑↓ / ←→ / Enter） ---------- */
+
+const dbListRef = ref<HTMLElement | null>(null);
+
+const flatTreeItems = computed<TreeFlatItem[]>(() => {
+  const out: TreeFlatItem[] = [];
+  for (const db of databases.value) {
+    out.push({ key: `db:${db.name}`, name: db.name, kind: 'db', data: db });
+    if (expandedDb.value === db.name) {
+      const cols = collections.value[db.name];
+      if (cols && cols.length > 0) {
+        for (const c of cols) {
+          out.push({
+            key: `col:${db.name}/${c.name}`,
+            name: c.name,
+            kind: 'col',
+            data: { db: db.name, col: c },
+          });
+        }
+      }
+    }
+  }
+  return out;
+});
+
+const tree = useTreeKeyNav({
+  flatItems: flatTreeItems,
+  container: dbListRef,
+  pickInitial: () => {
+    if (props.currentDatabase && props.currentCollection) {
+      return `col:${props.currentDatabase}/${props.currentCollection}`;
+    }
+    if (props.currentDatabase) return `db:${props.currentDatabase}`;
+    return null;
+  },
+  async onActivate(item) {
+    if (item.kind === 'db') {
+      await toggleDatabase(item.name);
+    } else if (item.kind === 'col') {
+      const d = (item.data as any)?.db as string | undefined;
+      if (d) pickCollection(d, item.name);
+    }
+  },
+  async onExpand(item) {
+    if (item.kind === 'db') {
+      if (expandedDb.value !== item.name) {
+        await toggleDatabase(item.name); // 展开
+      } else {
+        // 已展开 → 把焦点移到第一个 collection
+        const cols = collections.value[item.name];
+        if (cols && cols.length > 0) {
+          tree.setFocusedByKey(`col:${item.name}/${cols[0].name}`);
+        }
+      }
+    }
+  },
+  onCollapse(item) {
+    if (item.kind === 'col') {
+      const d = (item.data as any)?.db as string | undefined;
+      if (d) tree.setFocusedByKey(`db:${d}`);
+    } else if (item.kind === 'db' && expandedDb.value === item.name) {
+      expandedDb.value = null;
+    }
+  },
+});
+
+/** 鼠标点击 db / collection 时，同步焦点到该行（键盘继续从这里走） */
+function focusDb(name: string) {
+  tree.setFocusedByKey(`db:${name}`);
+}
+function focusCol(db: string, name: string) {
+  tree.setFocusedByKey(`col:${db}/${name}`);
+}
+
+/** 当用户切回 connections tab 时尝试聚焦 db 列表，让键盘立即可用 */
+watch(activeTab, async (next) => {
+  if (next !== 'connections') return;
+  await nextTick();
+  if (databases.value.length > 0) dbListRef.value?.focus();
+});
 
 function openAdd() {
   editing.value = null;
@@ -222,9 +304,31 @@ function formatTime(ts: number): string {
         </button>
       </div>
 
-      <ul v-if="conns.active.value" class="db-list">
+      <ul
+        v-if="conns.active.value"
+        ref="dbListRef"
+        class="db-list"
+        :class="{ 'kb-focused': tree.treeFocused.value }"
+        tabindex="0"
+        :aria-label="t('sidebar.sectionDbCol')"
+        :title="t('sidebar.kbHint')"
+        @keydown="tree.onKeydown"
+        @focus="tree.onFocus"
+        @blur="tree.onBlur"
+      >
         <li v-for="d in databases" :key="d.name" class="db-node">
-          <button :class="['db-toggle', { picked: props.currentDatabase === d.name }]" @click="toggleDatabase(d.name)">
+          <button
+            :data-tree-key="`db:${d.name}`"
+            :class="[
+              'db-toggle',
+              {
+                picked: props.currentDatabase === d.name,
+                'kb-focus': tree.isFocused({ key: `db:${d.name}`, name: d.name, kind: 'db' }),
+              },
+            ]"
+            tabindex="-1"
+            @click="focusDb(d.name); toggleDatabase(d.name)"
+          >
             <span class="caret">{{ expandedDb === d.name ? '▾' : '▸' }}</span>
             <span class="db-name">{{ d.name }}</span>
             <span v-if="d.sizeOnDisk" class="db-size">{{ Math.round(d.sizeOnDisk / 1024 / 1024) }}MB</span>
@@ -235,15 +339,30 @@ function formatTime(ts: number): string {
             <li
               v-for="col in collections[d.name]"
               :key="col.name"
+              :data-tree-key="`col:${d.name}/${col.name}`"
               :class="[
                 'col-item',
-                { active: props.currentDatabase === d.name && props.currentCollection === col.name },
+                {
+                  active: props.currentDatabase === d.name && props.currentCollection === col.name,
+                  'kb-focus': tree.isFocused({
+                    key: `col:${d.name}/${col.name}`,
+                    name: col.name,
+                    kind: 'col',
+                  }),
+                },
               ]"
-              @click="pickCollection(d.name, col.name)"
+              @click="focusCol(d.name, col.name); pickCollection(d.name, col.name)"
             >
               📄 {{ col.name }}
             </li>
           </ul>
+        </li>
+        <li
+          v-if="tree.treeFocused.value && tree.searchBuffer.value"
+          class="kb-search-hint"
+          aria-live="polite"
+        >
+          🔎 {{ tree.searchBuffer.value }}
         </li>
       </ul>
     </div>
@@ -462,6 +581,36 @@ function formatTime(ts: number): string {
   list-style: none;
   padding: 0;
   margin: 4px 0 0;
+  outline: none;
+  position: relative;
+}
+.db-list:focus,
+.db-list.kb-focused {
+  outline: none;
+}
+/* 键盘焦点行：左侧色条 + 强调色调，跟 .picked / .active 区分开 */
+.db-toggle.kb-focus,
+.col-item.kb-focus {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.db-list.kb-focused .db-toggle.kb-focus,
+.db-list.kb-focused .col-item.kb-focus {
+  background: var(--active);
+}
+.kb-search-hint {
+  position: sticky;
+  bottom: 4px;
+  margin: 6px 6px 0;
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0.92;
 }
 .db-node {
   margin-bottom: 1px;

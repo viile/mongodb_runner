@@ -611,6 +611,161 @@ pub async fn mongo_sample_documents(
     Ok(json!({ "ok": true, "docs": arr }))
 }
 
+/// 预评估一条 mongosh 命令将要影响的范围。
+///
+/// 返回：
+/// ```json
+/// {
+///   "ok": true,
+///   "operation": "deleteMany",
+///   "collection": "events",
+///   "database": "shop",
+///   "isWrite": true,
+///   "affectKind": "deleteMulti",        // "read" | "insert" | "updateSingle" | "updateMulti" | "deleteSingle" | "deleteMulti" | "replaceSingle" | "unknown"
+///   "matchedEstimate": 42,              // filter-based 写操作：count_documents(filter)
+///   "insertCount": null,                // insertOne / insertMany 时的待插入条数
+///   "affectedMax": 42,                  // 最大受影响文档数（单条 op 上限为 1）
+///   "dangerLevel": "danger",            // "safe" | "caution" | "danger"
+///   "filterPreview": "{\"type\":\"click\"}",
+///   "emptyFilter": false
+/// }
+/// ```
+///
+/// 评估**不会真正修改数据**，只会对 filter 做一次 count。
+#[tauri::command]
+pub async fn mongo_impact_estimate(
+    state: tauri::State<'_, Arc<MongoPool>>,
+    uri: String,
+    database: String,
+    command: String,
+) -> Result<Value, String> {
+    let parsed = match parse_mongo_command(&command) {
+        Ok(p) => p,
+        Err(e) => return Err(format!("命令解析失败: {}", e)),
+    };
+
+    let op = parsed.op.clone();
+    let collection = parsed.collection.clone();
+
+    let is_write = matches!(
+        op.as_str(),
+        "insertOne"
+            | "insertMany"
+            | "updateOne"
+            | "updateMany"
+            | "replaceOne"
+            | "deleteOne"
+            | "deleteMany"
+            | "findOneAndUpdate"
+            | "findOneAndDelete"
+            | "findOneAndReplace"
+    );
+
+    // (affect_kind, takes_filter, single_at_most_1)
+    let (affect_kind, takes_filter, max_one) = match op.as_str() {
+        "find" | "findOne" | "aggregate" | "countDocuments" | "estimatedDocumentCount"
+        | "distinct" => ("read", false, false),
+        "insertOne" | "insertMany" => ("insert", false, false),
+        "updateOne" | "findOneAndUpdate" => ("updateSingle", true, true),
+        "updateMany" => ("updateMulti", true, false),
+        "deleteOne" | "findOneAndDelete" => ("deleteSingle", true, true),
+        "deleteMany" => ("deleteMulti", true, false),
+        "replaceOne" | "findOneAndReplace" => ("replaceSingle", true, true),
+        _ => ("unknown", false, false),
+    };
+
+    let mut insert_count: Option<usize> = None;
+    let mut matched_estimate: Option<u64> = None;
+    let mut affected_max: Option<u64> = None;
+    let mut filter_preview: Option<String> = None;
+    let mut empty_filter = false;
+
+    // insert: 直接从 args 算条数
+    match op.as_str() {
+        "insertOne" => {
+            insert_count = Some(1);
+            affected_max = Some(1);
+        }
+        "insertMany" => {
+            if let Some(Bson::Array(arr)) = parsed.args.first() {
+                insert_count = Some(arr.len());
+                affected_max = Some(arr.len() as u64);
+            }
+        }
+        _ => {}
+    }
+
+    // filter-based 写操作：拿 filter 并 count
+    if takes_filter && is_write {
+        let filter_doc: Option<Document> = match parsed.args.first().cloned() {
+            Some(Bson::Document(d)) => Some(d),
+            Some(Bson::Null) | None => Some(Document::new()),
+            _ => None,
+        };
+        if let Some(filter) = filter_doc {
+            empty_filter = filter.is_empty();
+            // 给 UI 一个简短预览（最多 200 字符）
+            let ejson = bson_to_value(Bson::Document(filter.clone()));
+            let mut preview = serde_json::to_string(&ejson).unwrap_or_default();
+            if preview.chars().count() > 200 {
+                preview = preview.chars().take(200).collect::<String>() + "…";
+            }
+            filter_preview = Some(preview);
+
+            if let Ok(client) = state.get(&uri).await {
+                let coll: Collection<Document> =
+                    client.database(&database).collection(&collection);
+                let count_res = if empty_filter {
+                    coll.estimated_document_count().await
+                } else {
+                    coll.count_documents(filter).await
+                };
+                if let Ok(n) = count_res {
+                    matched_estimate = Some(n);
+                    affected_max = Some(if max_one { n.min(1) } else { n });
+                }
+            }
+            // count 失败就把这俩留 None，UI 显示 unknown
+        }
+    }
+
+    // 风险等级
+    let danger_level = if !is_write {
+        "safe"
+    } else if op == "deleteMany" || op == "updateMany" {
+        if empty_filter || matched_estimate.map_or(false, |n| n > 100) {
+            "danger"
+        } else {
+            "caution"
+        }
+    } else if op == "insertMany" {
+        if insert_count.map_or(false, |n| n > 50) {
+            "danger"
+        } else {
+            "caution"
+        }
+    } else if is_write {
+        "caution"
+    } else {
+        "safe"
+    };
+
+    Ok(json!({
+        "ok": true,
+        "operation": op,
+        "collection": collection,
+        "database": database,
+        "isWrite": is_write,
+        "affectKind": affect_kind,
+        "matchedEstimate": matched_estimate,
+        "insertCount": insert_count,
+        "affectedMax": affected_max,
+        "dangerLevel": danger_level,
+        "filterPreview": filter_preview,
+        "emptyFilter": empty_filter,
+    }))
+}
+
 #[tauri::command]
 pub async fn mongo_execute(
     state: tauri::State<'_, Arc<MongoPool>>,

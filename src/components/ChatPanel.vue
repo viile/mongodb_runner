@@ -9,9 +9,15 @@ import {
   type LLMSchema,
   type LLMResultPreview,
 } from '../api/llm';
-import { sampleDocuments, type ExecuteResult } from '../api/mongo';
+import {
+  estimateImpact,
+  sampleDocuments,
+  type ExecuteResult,
+  type ImpactInfo,
+} from '../api/mongo';
 import { useChat } from '../composables/useChat';
 import { useLLMProfiles } from '../composables/useLLMProfiles';
+import { formatMongoCommand } from '../utils/formatMongo';
 
 const { t, locale } = useI18n();
 const currentLocale = computed(() => String(locale.value));
@@ -255,10 +261,149 @@ async function generateFromPrompt() {
   }
 }
 
-/** 用户点击 assistant 消息里的「运行」按钮：先打标记，再让 App.vue 真正去跑 */
-function runFromAssistant(cmd: string) {
-  pendingFix.value = { command: cmd };
+/** 用户点击 assistant 消息里的「运行」按钮：评估影响 → （写操作）二次确认 → 让 App.vue 去跑 */
+async function runFromAssistant(cmd: string) {
+  if (loading.value) return;
+  const formatted = formatMongoCommand(cmd);
+
+  // 没有连接 / 没选 db 时，跳过评估，让 App.vue 给出统一的提示
+  if (!props.uri || !props.database) {
+    pendingFix.value = { command: formatted };
+    emit('run-command', cmd);
+    return;
+  }
+
+  // 1. 预评估影响范围
+  let impact: ImpactInfo | null = null;
+  try {
+    impact = await estimateImpact(props.uri, props.database, cmd);
+  } catch (e: any) {
+    chat.addSystem(t('chat.impactEstimateFailed', { error: e?.message || String(e) }));
+  }
+
+  if (impact) {
+    chat.addSystem(buildImpactMessage(impact));
+
+    // 2. 写操作 → 二次确认
+    if (impact.isWrite && impact.dangerLevel !== 'safe') {
+      try {
+        await ElMessageBox.confirm(
+          buildImpactConfirmBody(impact),
+          t('chat.impactConfirmTitle'),
+          {
+            type: impact.dangerLevel === 'danger' ? 'warning' : 'info',
+            confirmButtonText: t('chat.impactConfirmRun'),
+            cancelButtonText: t('chat.impactConfirmCancel'),
+            confirmButtonClass:
+              impact.dangerLevel === 'danger' ? 'el-button--danger' : '',
+            autofocus: false,
+          }
+        );
+      } catch {
+        chat.addSystem(t('chat.impactCancelled'));
+        return;
+      }
+    }
+  }
+
+  pendingFix.value = { command: formatted };
   emit('run-command', cmd);
+}
+
+/** 一行简洁的影响评估描述，用于 chat 里的 system 卡片 */
+function buildImpactMessage(i: ImpactInfo): string {
+  const op = i.operation;
+  const col = i.collection;
+  const matched = i.matchedEstimate;
+  switch (i.affectKind) {
+    case 'read':
+      return t('chat.impactRead', { op, col });
+    case 'insert':
+      if (op === 'insertOne') return t('chat.impactInsertOne', { op, col });
+      return t('chat.impactInsertMany', {
+        op,
+        col,
+        n: i.insertCount ?? '?',
+      });
+    case 'updateSingle':
+    case 'deleteSingle':
+    case 'replaceSingle':
+      if (matched == null) return t('chat.impactSingleUnknown', { op, col });
+      return t('chat.impactSingle', { op, col, matched });
+    case 'updateMulti':
+    case 'deleteMulti':
+      if (i.emptyFilter) return t('chat.impactEmptyFilter', { op, col, n: matched ?? '?' });
+      if (matched == null) return t('chat.impactMultiUnknown', { op, col });
+      return t('chat.impactMulti', { op, col, matched });
+    default:
+      return `${op} on \`${col}\``;
+  }
+}
+
+/** 确认框正文 */
+function buildImpactConfirmBody(i: ImpactInfo): string {
+  const lines: string[] = [buildImpactMessage(i)];
+  if (i.filterPreview) {
+    lines.push(`${t('chat.impactFilterLabel')}: ${i.filterPreview}`);
+  }
+  if (i.emptyFilter && (i.affectKind === 'deleteMulti' || i.affectKind === 'updateMulti')) {
+    lines.push(t('chat.impactEmptyFilterWarn'));
+  }
+  return lines.join('\n');
+}
+
+/** 成功结果摘要：在 chat 里以 system 卡片形式呈现 */
+function buildSuccessSummary(r: ExecuteResult): string {
+  const op = r.operation ?? '?';
+  const col = r.collection ?? '?';
+  const ms = typeof r.elapsedMs === 'number' ? r.elapsedMs : 0;
+  const trunc = r.truncated === true;
+  const data: any = r.data;
+  switch (r.kind) {
+    case 'documents': {
+      const n = r.count ?? (Array.isArray(data) ? data.length : 0);
+      if (trunc) return t('chat.summaryDocsTrunc', { op, col, n, ms });
+      return t('chat.summaryDocs', { op, col, n, ms });
+    }
+    case 'document':
+      if (data == null) return t('chat.summaryNoDoc', { op, col, ms });
+      return t('chat.summaryDoc', { op, col, ms });
+    case 'scalar':
+      return t('chat.summaryScalar', { op, col, value: data, ms });
+    case 'writeResult': {
+      // insert
+      if (op === 'insertOne') {
+        const id = data?.insertedId
+          ? typeof data.insertedId === 'object'
+            ? JSON.stringify(data.insertedId)
+            : String(data.insertedId)
+          : '?';
+        return t('chat.summaryInsertOne', { op, col, id, ms });
+      }
+      if (op === 'insertMany') {
+        const ids = data?.insertedIds ?? {};
+        const n = typeof ids === 'object' && ids !== null ? Object.keys(ids).length : 0;
+        return t('chat.summaryInsertMany', { op, col, n, ms });
+      }
+      // delete
+      if (op === 'deleteOne' || op === 'deleteMany') {
+        const n = data?.deletedCount ?? 0;
+        return t('chat.summaryDelete', { op, col, n, ms });
+      }
+      // update / replace
+      const matched = data?.matchedCount ?? 0;
+      const modified = data?.modifiedCount ?? 0;
+      const upsertedId = data?.upsertedId;
+      const upserted = upsertedId != null && upsertedId !== false;
+      if (upserted) return t('chat.summaryUpdateUpsert', { op, col, ms });
+      if (op === 'replaceOne' || op === 'findOneAndReplace') {
+        return t('chat.summaryReplace', { op, col, matched, modified, ms });
+      }
+      return t('chat.summaryUpdate', { op, col, matched, modified, ms });
+    }
+    default:
+      return t('chat.summaryGeneric', { op, col, ms });
+  }
 }
 
 /**
@@ -313,7 +458,10 @@ watch(
     }
     const cmd = pendingFix.value.command;
     pendingFix.value = null;
-    if (newR.ok) return;
+    if (newR.ok) {
+      chat.addSystem(buildSuccessSummary(newR));
+      return;
+    }
     if (!autoFixOnError.value) return;
     analyzeFailure(cmd, newR.error || '');
   }
@@ -410,7 +558,7 @@ function renderContent(text: string): string {
           :key="m.id"
           :class="['msg', m.role]"
         >
-          <div class="role-line">
+          <div v-if="m.role !== 'system'" class="role-line">
             <span class="role-tag">{{ m.role === 'user' ? t('chat.roleUser') : t('chat.roleAi') }}</span>
           </div>
           <div class="bubble" v-html="renderContent(m.content)" />
@@ -634,6 +782,9 @@ function renderContent(text: string): string {
 .msg.assistant {
   align-items: flex-start;
 }
+.msg.system {
+  align-items: stretch;
+}
 .role-line {
   font-size: 10px;
   color: var(--text-mute);
@@ -663,6 +814,17 @@ function renderContent(text: string): string {
   color: var(--text);
   border-bottom-left-radius: 3px;
   border: 1px solid var(--border);
+}
+.msg.system .bubble {
+  background: var(--panel-2);
+  color: var(--text-dim);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: pre-wrap;
+  align-self: stretch;
+  max-width: 100%;
 }
 .bubble :deep(.cb) {
   display: block;

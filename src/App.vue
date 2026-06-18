@@ -12,6 +12,7 @@ import { currentElementLocale } from './i18n';
 import { useConnections } from './composables/useConnections';
 import { useHistory, type HistoryItem } from './composables/useHistory';
 import { executeMongoCommand, type ExecuteResult } from './api/mongo';
+import { formatMongoCommand } from './utils/formatMongo';
 
 const { t } = useI18n();
 const conns = useConnections();
@@ -199,14 +200,14 @@ function handleStop() {
 }
 
 function handleUseGenerated(cmd: string) {
-  command.value = cmd;
+  command.value = formatMongoCommand(cmd);
   flashEditor();
   ElMessage.success(t('msg.filled'));
 }
 
 async function handleRunGenerated(cmd: string) {
   // 先把命令写入编辑器并触发一次闪烁，让用户清楚看到「右侧的命令进了中间编辑器」
-  command.value = cmd;
+  command.value = formatMongoCommand(cmd);
   flashEditor();
   await handleRun();
 }
