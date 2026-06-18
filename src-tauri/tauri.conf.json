@@ -1,0 +1,42 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "MongoDB Runner",
+  "version": "0.1.0",
+  "identifier": "dev.mongodb-runner.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5174",
+    "beforeDevCommand": "npm run dev:web",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MongoDB Runner",
+        "width": 1400,
+        "height": 880,
+        "minWidth": 980,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Local MongoDB client with LLM-assisted query generation",
+    "longDescription": "A privacy-friendly desktop MongoDB client. Three-pane layout (sidebar, JSON result, AI assistant). All MongoDB calls happen locally via the Rust driver; no proxy server required.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

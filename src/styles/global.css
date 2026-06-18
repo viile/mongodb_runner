@@ -1,0 +1,179 @@
+:root {
+  /* surfaces */
+  --bg: #f5f6fa;
+  --panel: #ffffff;
+  --panel-2: #f1f3f8;
+  --panel-3: #e9ecf3;
+  --header-from: #ffffff;
+  --header-to: #f1f3f8;
+
+  /* borders */
+  --border: #e4e7ee;
+  --border-strong: #d1d5dc;
+
+  /* text */
+  --text: #1f2430;
+  --text-dim: #5b6473;
+  --text-mute: #8a909c;
+  --text-faint: #b8bcc6;
+
+  /* state */
+  --hover: rgba(45, 159, 119, 0.08);
+  --hover-strong: rgba(45, 159, 119, 0.16);
+  --active: rgba(45, 159, 119, 0.12);
+  --active-border: rgba(45, 159, 119, 0.45);
+  --selection-bg: rgba(45, 159, 119, 0.22);
+
+  --kbd-bg: rgba(0, 0, 0, 0.06);
+  --kbd-text: #4b5563;
+
+  /* MongoDB 绿系 */
+  --accent: #00684a;
+  --accent-2: #2dba87;
+  --accent-3: #b5e9d4;
+  --danger: #d63948;
+  --warn: #c2700a;
+  --info: #2563eb;
+
+  /* JSON token colors */
+  --tok-key: #2563eb;
+  --tok-str: #0e8b6a;
+  --tok-num: #b06200;
+  --tok-bool: #c4407a;
+  --tok-null: #6b7280;
+
+  --brand-from: #00684a;
+  --brand-to: #2dba87;
+
+  --scroll: #d4d7dd;
+  --scroll-hover: #b6bac3;
+  --shadow-strong: 0 14px 40px rgba(35, 40, 60, 0.18);
+
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0f1115;
+  --panel: #161922;
+  --panel-2: #1c2030;
+  --panel-3: #232739;
+  --header-from: #181c27;
+  --header-to: #11131a;
+
+  --border: #2a2f3d;
+  --border-strong: #3a4159;
+
+  --text: #e6e9ef;
+  --text-dim: #9aa3b2;
+  --text-mute: #6c7388;
+  --text-faint: #545b6e;
+
+  --hover: rgba(45, 186, 135, 0.14);
+  --hover-strong: rgba(45, 186, 135, 0.24);
+  --active: rgba(45, 186, 135, 0.18);
+  --active-border: rgba(45, 186, 135, 0.45);
+  --selection-bg: rgba(45, 186, 135, 0.35);
+
+  --kbd-bg: rgba(255, 255, 255, 0.1);
+  --kbd-text: rgba(255, 255, 255, 0.85);
+
+  --accent: #2dba87;
+  --accent-2: #5ddca7;
+  --accent-3: #1f4a3a;
+  --danger: #ff5d6c;
+  --warn: #ffb454;
+  --info: #7fb4ff;
+
+  --tok-key: #7fb4ff;
+  --tok-str: #2bd9b1;
+  --tok-num: #ffb454;
+  --tok-bool: #ff7eb6;
+  --tok-null: #9aa3b2;
+
+  --brand-from: #5ddca7;
+  --brand-to: #2dba87;
+
+  --scroll: #2f3548;
+  --scroll-hover: #3b425a;
+  --shadow-strong: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  font-size: 14px;
+  overflow: hidden;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+::selection {
+  background: var(--selection-bg);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-hover);
+}
+
+.hdr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.hdr-btn:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+.hdr-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+/* element-plus dark 局部微调 */
+.el-button.is-text {
+  color: var(--text-dim);
+}
+.el-tag {
+  font-weight: 600;
+}

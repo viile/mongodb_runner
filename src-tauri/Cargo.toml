@@ -1,0 +1,49 @@
+[package]
+name = "mongodb-runner"
+version = "0.1.0"
+description = "A local MongoDB client with LLM-powered query generation."
+authors = ["mongodb-runner"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+
+# async
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "fs", "time", "sync"] }
+futures = "0.3"
+
+# MongoDB driver + EJSON
+mongodb = { version = "3.1", default-features = false, features = ["rustls-tls", "compat-3-3-0"] }
+bson = { version = "2.13", features = ["chrono-0_4"] }
+
+# LLM HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+
+# mongosh command parser
+regex = "1"
+
+# config / fs
+dirs = "5"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
