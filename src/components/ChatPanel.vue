@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useI18n } from 'vue-i18n';
 import {
   chatWithLLM,
@@ -13,7 +13,8 @@ import { sampleDocuments, type ExecuteResult } from '../api/mongo';
 import { useChat } from '../composables/useChat';
 import { useLLMProfiles } from '../composables/useLLMProfiles';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+const currentLocale = computed(() => String(locale.value));
 const llm = useLLMProfiles();
 
 const props = defineProps<{
@@ -27,6 +28,8 @@ const props = defineProps<{
   placeholderCommand?: string | null;
   /** 上一次执行结果（包含 error / data 等） */
   lastResult?: ExecuteResult | null;
+  /** 上一次「实际跑过去」的命令文本，用于精确判断结果归属 */
+  lastExecutedCommand?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -40,8 +43,17 @@ const loading = ref(false);
 const includeSample = ref(true);
 const includeCommand = ref(true);
 const includeResult = ref(true);
+/** LLM 生成的命令执行失败时是否自动让 LLM 给出修复建议 */
+const autoFixOnError = ref(true);
 const llmAvailable = ref<boolean | null>(null);
 const llmInfo = ref<string>('');
+
+/**
+ * 用户点了某条 assistant 消息里的「运行」按钮后，记录我们在等什么结果。
+ * 之后 props.lastResult 变化时，结合 props.lastExecutedCommand 判断这次结果是不是我们触发的，
+ * 是失败的话就自动让 LLM 分析并给出修复方案。
+ */
+const pendingFix = ref<{ command: string } | null>(null);
 
 /** 上一次结果是否值得作为上下文（成功有 data 或失败有 error 都算） */
 const hasMeaningfulResult = computed(() => {
@@ -197,7 +209,7 @@ async function sendMessage(rawInput?: string) {
     const history = chat.messages.value
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    const r = await chatWithLLM(history, schema, llm.active.value);
+    const r = await chatWithLLM(history, schema, llm.active.value, currentLocale.value);
     if (r.ok && r.reply) {
       chat.addAssistant(r.reply);
     } else {
@@ -226,7 +238,7 @@ async function generateFromPrompt() {
   loading.value = true;
   try {
     const schema = await buildSchema();
-    const r = await generateMongoCommand(text, schema, llm.active.value);
+    const r = await generateMongoCommand(text, schema, llm.active.value, currentLocale.value);
     if (r.ok && r.command) {
       chat.addAssistant(`${t('chat.generated')}\n\n\`\`\`js\n${r.command}\n\`\`\``);
     } else {
@@ -242,6 +254,70 @@ async function generateFromPrompt() {
     loading.value = false;
   }
 }
+
+/** 用户点击 assistant 消息里的「运行」按钮：先打标记，再让 App.vue 真正去跑 */
+function runFromAssistant(cmd: string) {
+  pendingFix.value = { command: cmd };
+  emit('run-command', cmd);
+}
+
+/**
+ * 让 LLM 基于「失败的命令 + 错误 + 当前上下文」给出诊断和修复方案。
+ * 修复命令通过 ```js``` 代码块返回，会被 `extractCommand` 识别，
+ * 现有的「使用 / 运行」按钮就能让用户选择是否继续执行。
+ */
+async function analyzeFailure(failedCommand: string, errorText: string) {
+  if (loading.value) return;
+  if (llmAvailable.value === false) return;
+  // 合成的 user 提示，连同已有 history 一起送出
+  const synthetic = t('chat.autoFixPrompt', {
+    command: failedCommand,
+    error: errorText || 'unknown error',
+  });
+  chat.addUser(synthetic);
+  loading.value = true;
+  try {
+    const schema = await buildSchema();
+    const history = chat.messages.value
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+    const r = await chatWithLLM(history, schema, llm.active.value, currentLocale.value);
+    if (r.ok && r.reply) {
+      chat.addAssistant(r.reply);
+    } else {
+      const err = r.error || '';
+      chat.addAssistant(t('chat.replyFailed', { error: err }));
+      ElMessage.error(err || 'LLM error');
+    }
+  } catch (e: any) {
+    const err = e?.message || String(e);
+    chat.addAssistant(t('chat.requestException', { error: err }));
+    ElMessage.error(err);
+  } finally {
+    loading.value = false;
+  }
+}
+
+// 监听结果回来。仅当结果对应「我们刚才让它运行的那条命令」时才处理。
+watch(
+  () => props.lastResult,
+  (newR) => {
+    if (!newR) return;
+    if (!pendingFix.value) return;
+    const expected = pendingFix.value.command.trim();
+    const actual = (props.lastExecutedCommand ?? '').trim();
+    // 不是我们这次 chat-run 的结果（比如用户穿插点了编辑器的运行）就丢掉等待状态
+    if (expected !== actual) {
+      pendingFix.value = null;
+      return;
+    }
+    const cmd = pendingFix.value.command;
+    pendingFix.value = null;
+    if (newR.ok) return;
+    if (!autoFixOnError.value) return;
+    analyzeFailure(cmd, newR.error || '');
+  }
+);
 
 function onKeydown(ev: KeyboardEvent) {
   if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
@@ -260,6 +336,32 @@ function pickQuick(p: string) {
 
 const hasMessages = computed(() => chat.messages.value.length > 0);
 
+async function startNewChat() {
+  // 当前空着就不弹确认，直接重置输入并提示
+  if (!hasMessages.value) {
+    input.value = '';
+    ElMessage.success(t('chat.newChatStarted'));
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      t('chat.newChatConfirmBody'),
+      t('chat.newChatConfirmTitle'),
+      {
+        confirmButtonText: t('chat.newChatConfirmOk'),
+        cancelButtonText: t('chat.newChatConfirmCancel'),
+        type: 'warning',
+        autofocus: false,
+      }
+    );
+  } catch {
+    return;
+  }
+  chat.clear();
+  input.value = '';
+  ElMessage.success(t('chat.newChatStarted'));
+}
+
 function renderContent(text: string): string {
   // 简单 markdown 处理：```code``` 块 + 内联 `code`
   const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
@@ -277,9 +379,13 @@ function renderContent(text: string): string {
       <span :class="['status', llmAvailable ? 'ok' : 'off']" :title="llmInfo">
         {{ llmAvailable === null ? '...' : llmAvailable ? llmInfo : t('chat.disabled') }}
       </span>
+      <span v-if="hasMessages" class="turn-badge" :title="t('chat.turnsTitle', { n: chat.messages.value.length })">
+        {{ chat.messages.value.length }}
+      </span>
       <div class="spacer" />
-      <button class="ic-btn" :disabled="!hasMessages" :title="t('chat.clearTitle')" @click="chat.clear()">
-        🗑
+      <button class="new-chat-btn" :title="t('chat.newChatTitle')" @click="startNewChat">
+        <span class="ic">✨</span>
+        <span class="lbl">{{ t('chat.newChat') }}</span>
       </button>
     </div>
 
@@ -311,7 +417,7 @@ function renderContent(text: string): string {
           <div v-if="m.role === 'assistant' && m.command" class="cmd-actions">
             <span class="cmd-label">{{ t('chat.cmdDetected') }}</span>
             <button class="cmd-btn" @click="emit('use-command', m.command!)">{{ t('chat.cmdUse') }}</button>
-            <button class="cmd-btn primary" @click="emit('run-command', m.command!)">{{ t('chat.cmdRun') }}</button>
+            <button class="cmd-btn primary" @click="runFromAssistant(m.command!)">{{ t('chat.cmdRun') }}</button>
           </div>
         </div>
         <div v-if="loading" class="msg assistant">
@@ -338,6 +444,10 @@ function renderContent(text: string): string {
         <label class="opt" :title="t('chat.optIncludeResultTitle')">
           <input v-model="includeResult" type="checkbox" :disabled="!hasMeaningfulResult" />
           {{ t('chat.optIncludeResult') }}
+        </label>
+        <label class="opt" :title="t('chat.optAutoFixTitle')">
+          <input v-model="autoFixOnError" type="checkbox" />
+          {{ t('chat.optAutoFix') }}
         </label>
       </div>
       <textarea
@@ -414,6 +524,46 @@ function renderContent(text: string): string {
 .ic-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.turn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--panel-3, var(--hover));
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  user-select: none;
+}
+.new-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+.new-chat-btn:hover {
+  background: var(--hover);
+  border-color: var(--primary, var(--text-dim));
+}
+.new-chat-btn .ic {
+  font-size: 13px;
+  line-height: 1;
+}
+.new-chat-btn .lbl {
+  font-weight: 500;
 }
 
 .messages {

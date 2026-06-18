@@ -125,7 +125,8 @@ export async function getLLMStatus(profile?: LLMProfile | null): Promise<LLMStat
 export async function generateMongoCommand(
   prompt: string,
   schema?: LLMSchema,
-  profile?: LLMProfile | null
+  profile?: LLMProfile | null,
+  locale?: string | null
 ) {
   return ipc<{
     ok: boolean;
@@ -137,13 +138,15 @@ export async function generateMongoCommand(
     prompt,
     schema: schema ?? null,
     profile: profilePayload(profile),
+    locale: locale ?? null,
   });
 }
 
 export async function chatWithLLM(
   messages: ChatMessage[],
   schema?: LLMSchema,
-  profile?: LLMProfile | null
+  profile?: LLMProfile | null,
+  locale?: string | null
 ) {
   return ipc<{
     ok: boolean;
@@ -155,6 +158,7 @@ export async function chatWithLLM(
     messages,
     schema: schema ?? null,
     profile: profilePayload(profile),
+    locale: locale ?? null,
   });
 }
 

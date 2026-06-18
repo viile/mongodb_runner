@@ -35,6 +35,65 @@ const CHAT_SYSTEM: &str = "你是 MongoDB Runner 内置的助手。你既懂 Mon
 回答简洁、直接；涉及命令时使用 mongosh 单行风格，参数用 EJSON 双引号 key。
 当用户请求生成可执行命令时，把命令单独放在一对 ```js``` 代码块中。";
 
+/// 把前端传入的 BCP-47 locale 转成一个英文语言名（用于注入到 system prompt）。
+/// 设计原则：英文名描述更稳定，且模型对 "English / Simplified Chinese" 这类称谓有更一致的认知。
+fn locale_to_language_name(locale: &str) -> Option<&'static str> {
+    let lower = locale.to_lowercase().replace('_', "-");
+    let primary = lower.split('-').next().unwrap_or("");
+    // 精确匹配优先
+    let by_exact = match lower.as_str() {
+        "zh-cn" | "zh-hans" | "zh" => Some("Simplified Chinese (简体中文)"),
+        "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant" => Some("Traditional Chinese (繁體中文)"),
+        "en-us" | "en-gb" | "en" => Some("English"),
+        "ja-jp" | "ja" => Some("Japanese (日本語)"),
+        "ko-kr" | "ko" => Some("Korean (한국어)"),
+        "fr-fr" | "fr" => Some("French (Français)"),
+        "de-de" | "de" => Some("German (Deutsch)"),
+        "es-es" | "es" => Some("Spanish (Español)"),
+        "pt-br" | "pt-pt" | "pt" => Some("Brazilian Portuguese (Português)"),
+        "ru-ru" | "ru" => Some("Russian (Русский)"),
+        _ => None,
+    };
+    if by_exact.is_some() {
+        return by_exact;
+    }
+    // 退而用 primary subtag
+    match primary {
+        "zh" => Some("Simplified Chinese (简体中文)"),
+        "en" => Some("English"),
+        "ja" => Some("Japanese (日本語)"),
+        "ko" => Some("Korean (한국어)"),
+        "fr" => Some("French (Français)"),
+        "de" => Some("German (Deutsch)"),
+        "es" => Some("Spanish (Español)"),
+        "pt" => Some("Brazilian Portuguese (Português)"),
+        "ru" => Some("Russian (Русский)"),
+        _ => None,
+    }
+}
+
+/// 给 chat 类系统提示追加「请用 X 语言回复」。
+/// generate 命令本身只输出 mongosh 命令，不受影响，所以不附加。
+fn with_locale(base: &str, locale: Option<&str>) -> String {
+    let lang = locale
+        .and_then(|l| if l.trim().is_empty() { None } else { Some(l) })
+        .and_then(locale_to_language_name);
+    match lang {
+        Some(name) => format!(
+            "{base}\n\n# Reply language\n\
+             The user's UI language is **{name}**. \
+             You MUST reply in {name} for any natural-language prose, \
+             including explanations, summaries, warnings and clarifying questions. \
+             Code, JSON, EJSON, command syntax, field names and identifiers must remain unchanged. \
+             If the user explicitly switches to another language in their message, \
+             follow the user instead.",
+            base = base,
+            name = name,
+        ),
+        None => base.to_string(),
+    }
+}
+
 /* ---------------- profile（来自前端） ---------------- */
 
 #[derive(Debug, Clone, Deserialize)]
@@ -568,6 +627,7 @@ pub async fn llm_generate(
     prompt: String,
     schema: Option<Value>,
     profile: Option<LLMProfile>,
+    locale: Option<String>,
 ) -> Result<Value, String> {
     let prompt = prompt.trim().to_string();
     if prompt.is_empty() {
@@ -578,7 +638,9 @@ pub async fn llm_generate(
         describe_schema(&schema),
         prompt
     );
-    match dispatch(GENERATE_SYSTEM, user_prompt, vec![], profile).await {
+    // generate 主要是单行命令，本身不需要语言指令；但保留 locale 以便日后输出注释
+    let system = with_locale(GENERATE_SYSTEM, locale.as_deref());
+    match dispatch(&system, user_prompt, vec![], profile).await {
         Ok(out) => {
             let command = strip_code_fences(&out.content);
             Ok(json!({
@@ -597,6 +659,7 @@ pub async fn llm_chat(
     messages: Vec<ChatMessage>,
     schema: Option<Value>,
     profile: Option<LLMProfile>,
+    locale: Option<String>,
 ) -> Result<Value, String> {
     if messages.is_empty() {
         return Ok(json!({"ok": false, "error": "messages 不能为空"}));
@@ -617,7 +680,8 @@ pub async fn llm_chat(
         describe_schema(&schema),
         last.content
     );
-    match dispatch(CHAT_SYSTEM, user_prompt, history, profile).await {
+    let system = with_locale(CHAT_SYSTEM, locale.as_deref());
+    match dispatch(&system, user_prompt, history, profile).await {
         Ok(out) => Ok(json!({
             "ok": true,
             "reply": out.content,

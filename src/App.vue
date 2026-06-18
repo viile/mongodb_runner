@@ -35,6 +35,8 @@ watch(
 );
 const loading = ref(false);
 const result = ref<ExecuteResult | null>(null);
+/** 最近一次实际跑过去的命令文本，用于 ChatPanel 精确识别「这次结果是不是我让它跑的」 */
+const lastExecutedCommand = ref<string | null>(null);
 /**
  * Tauri 的 invoke 没有 AbortSignal；我们用一个递增的 token 来识别「最新的一次请求」，
  * 用户重复点击执行时，旧的结果会被新的覆盖（旧 promise 完成时发现 token 不匹配就丢弃）。
@@ -155,6 +157,7 @@ async function handleRun() {
   try {
     const r = await executeMongoCommand(active.uri, currentDatabase.value, cmd, 1000);
     if (myToken !== runToken) return;
+    lastExecutedCommand.value = cmd;
     result.value = r;
     history.record({
       connectionId: active.id,
@@ -171,6 +174,7 @@ async function handleRun() {
     if (myToken !== runToken) return;
     const msg = e?.message || String(e);
     ElMessage.error(t('msg.requestFailed', { msg }));
+    lastExecutedCommand.value = cmd;
     result.value = { ok: false, error: msg };
     history.record({
       connectionId: active.id,
@@ -282,6 +286,7 @@ async function handleRunGenerated(cmd: string) {
             :current-command="command"
             :placeholder-command="lastPlaceholder"
             :last-result="result"
+            :last-executed-command="lastExecutedCommand"
             @use-command="handleUseGenerated"
             @run-command="handleRunGenerated"
           />
