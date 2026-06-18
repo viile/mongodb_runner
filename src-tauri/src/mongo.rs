@@ -9,7 +9,7 @@
 use crate::parser::{parse_mongo_command, ParsedCommand};
 use bson::{Bson, Document};
 use futures::stream::TryStreamExt;
-use mongodb::options::{ClientOptions, FindOneAndUpdateOptions, FindOneAndReplaceOptions, FindOneAndDeleteOptions};
+use mongodb::options::{ClientOptions, UpdateModifications};
 use mongodb::{Client, Collection, Database};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -362,7 +362,7 @@ async fn run_command(
             let filter = nth_doc(parsed, 0)?;
             let update_arg = nth_arg(parsed, 1).unwrap_or(Bson::Null);
             let update_doc = match update_arg {
-                Bson::Document(d) => bson::UpdateModifications::Document(d),
+                Bson::Document(d) => UpdateModifications::Document(d),
                 Bson::Array(arr) => {
                     let mut docs: Vec<Document> = vec![];
                     for v in arr {
@@ -372,7 +372,7 @@ async fn run_command(
                             return Err("pipeline update 数组元素必须是对象".into());
                         }
                     }
-                    bson::UpdateModifications::Pipeline(docs)
+                    UpdateModifications::Pipeline(docs)
                 }
                 _ => return Err("update 第二个参数必须是对象或管道数组".into()),
             };
@@ -463,7 +463,7 @@ async fn run_command(
             let filter = nth_doc(parsed, 0)?;
             let update_arg = nth_arg(parsed, 1).unwrap_or(Bson::Null);
             let update_doc = match update_arg {
-                Bson::Document(d) => bson::UpdateModifications::Document(d),
+                Bson::Document(d) => UpdateModifications::Document(d),
                 Bson::Array(arr) => {
                     let mut docs: Vec<Document> = vec![];
                     for v in arr {
@@ -471,11 +471,10 @@ async fn run_command(
                             docs.push(d);
                         }
                     }
-                    bson::UpdateModifications::Pipeline(docs)
+                    UpdateModifications::Pipeline(docs)
                 }
                 _ => return Err("findOneAndUpdate update 必须是对象或管道数组".into()),
             };
-            let _options: Option<FindOneAndUpdateOptions> = None; // 默认即可
             let r = coll
                 .find_one_and_update(filter, update_doc)
                 .await
@@ -498,7 +497,6 @@ async fn run_command(
         }
         "findOneAndDelete" => {
             let filter = nth_doc(parsed, 0)?;
-            let _options: Option<FindOneAndDeleteOptions> = None;
             let r = coll.find_one_and_delete(filter).await.map_err(|e| e.to_string())?;
             Ok(ExecuteSuccess {
                 ok: true,
@@ -519,7 +517,6 @@ async fn run_command(
         "findOneAndReplace" => {
             let filter = nth_doc(parsed, 0)?;
             let replacement = nth_doc(parsed, 1)?;
-            let _options: Option<FindOneAndReplaceOptions> = None;
             let r = coll
                 .find_one_and_replace(filter, replacement)
                 .await

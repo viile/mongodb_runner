@@ -161,13 +161,12 @@ function splitArgs(s: string): string[] {
 
 <style scoped>
 .query-editor {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   background: var(--panel);
   display: flex;
   flex-direction: column;
-  min-height: 160px;
-  max-height: 40%;
 }
 .toolbar {
   display: flex;

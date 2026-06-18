@@ -1,7 +1,14 @@
 /**
- * MongoDB 后端调用封装。后端响应均为 EJSON 字符串，前端用 JSON.parse 即可
- * （EJSON relaxed 形式与普通 JSON 兼容；ObjectId / Date 等会被序列化成 {"$oid":...} / {"$date":...}）。
+ * MongoDB 调用：全部通过 Tauri invoke 走本地 Rust。
+ * 不再依赖任何 HTTP 后端。
+ *
+ * Rust 侧返回的对象里，BSON 特殊类型已经被转成 relaxed EJSON：
+ *   - ObjectId → {"$oid": "..."}
+ *   - Date     → {"$date": "..."}
+ *   - Long     → {"$numberLong": "..."}（仅在超出 i32 时）
  */
+
+import { invoke } from '@tauri-apps/api/core';
 
 export interface MongoDatabase {
   name: string;
@@ -30,34 +37,26 @@ export interface ExecuteResult {
   error?: string;
 }
 
-async function postJSON<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  });
-  const text = await res.text();
+async function ipc<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(`后端返回了非 JSON 内容: ${text.slice(0, 200)}`);
+    return await invoke<T>(cmd, args);
+  } catch (e: any) {
+    if (typeof e === 'string') throw new Error(e);
+    if (e && typeof e === 'object' && 'message' in e) throw new Error(String((e as any).message));
+    throw new Error(String(e));
   }
 }
 
-export async function listDatabases(uri: string, signal?: AbortSignal) {
-  return postJSON<{ ok: boolean; databases?: MongoDatabase[]; error?: string }>(
-    '/api/mongo/databases',
-    { uri },
-    signal
-  );
+export async function listDatabases(uri: string) {
+  return ipc<{ ok: boolean; databases?: MongoDatabase[]; error?: string }>('mongo_list_databases', {
+    uri,
+  });
 }
 
-export async function listCollections(uri: string, database: string, signal?: AbortSignal) {
-  return postJSON<{ ok: boolean; collections?: MongoCollection[]; error?: string }>(
-    '/api/mongo/collections',
-    { uri, database },
-    signal
+export async function listCollections(uri: string, database: string) {
+  return ipc<{ ok: boolean; collections?: MongoCollection[]; error?: string }>(
+    'mongo_list_collections',
+    { uri, database }
   );
 }
 
@@ -65,26 +64,26 @@ export async function sampleDocuments(
   uri: string,
   database: string,
   collection: string,
-  size = 3,
-  signal?: AbortSignal
+  size = 3
 ) {
-  return postJSON<{ ok: boolean; docs?: unknown[]; error?: string }>(
-    '/api/mongo/sample',
-    { uri, database, collection, size },
-    signal
-  );
+  return ipc<{ ok: boolean; docs?: unknown[]; error?: string }>('mongo_sample_documents', {
+    uri,
+    database,
+    collection,
+    size,
+  });
 }
 
 export async function executeMongoCommand(
   uri: string,
   database: string,
   command: string,
-  limit = 1000,
-  signal?: AbortSignal
+  limit = 1000
 ): Promise<ExecuteResult> {
-  return postJSON<ExecuteResult>(
-    '/api/mongo/execute',
-    { uri, database, command, limit },
-    signal
-  );
+  return ipc<ExecuteResult>('mongo_execute', {
+    uri,
+    database,
+    command,
+    limit,
+  });
 }

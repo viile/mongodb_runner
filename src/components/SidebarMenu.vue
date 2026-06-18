@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 import ConnectionDialog from './ConnectionDialog.vue';
 import { useConnections, type MongoConnection } from '../composables/useConnections';
 import { useHistory, type HistoryItem } from '../composables/useHistory';
 import { listCollections, listDatabases, type MongoCollection, type MongoDatabase } from '../api/mongo';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   currentDatabase: string | null;
@@ -57,10 +60,10 @@ async function refreshDatabases() {
       const sys = (r.databases || []).filter((d) => ['admin', 'config', 'local'].includes(d.name));
       databases.value = [...databases.value, ...sys];
     } else {
-      ElMessage.error(`列库失败: ${r.error || '未知错误'}`);
+      ElMessage.error(t('sidebar.listDbFailed', { error: r.error || '' }));
     }
   } catch (e: any) {
-    ElMessage.error(`列库失败: ${e?.message || String(e)}`);
+    ElMessage.error(t('sidebar.listDbFailed', { error: e?.message || String(e) }));
   } finally {
     loadingDb.value = false;
   }
@@ -81,10 +84,10 @@ async function toggleDatabase(dbName: string) {
     if (r.ok) {
       collections.value[dbName] = (r.collections || []).filter((c) => !c.name.startsWith('system.'));
     } else {
-      ElMessage.error(`列集合失败: ${r.error || '未知错误'}`);
+      ElMessage.error(t('sidebar.listColFailed', { error: r.error || '' }));
     }
   } catch (e: any) {
-    ElMessage.error(`列集合失败: ${e?.message || String(e)}`);
+    ElMessage.error(t('sidebar.listColFailed', { error: e?.message || String(e) }));
   }
 }
 
@@ -109,7 +112,7 @@ function onSave(payload: { id?: string; name: string; uri: string; defaultDataba
       uri: payload.uri,
       defaultDatabase: payload.defaultDatabase,
     });
-    ElMessage.success('已保存');
+    ElMessage.success(t('sidebar.saved'));
   } else {
     const c = conns.add({
       name: payload.name,
@@ -117,17 +120,19 @@ function onSave(payload: { id?: string; name: string; uri: string; defaultDataba
       defaultDatabase: payload.defaultDatabase,
     });
     conns.setActive(c.id);
-    ElMessage.success('已新增并激活');
+    ElMessage.success(t('sidebar.addedActivated'));
   }
 }
 
 async function removeConnection(c: MongoConnection) {
   try {
-    await ElMessageBox.confirm(`删除连接「${c.name}」？此操作不可恢复。`, '确认删除', {
-      type: 'warning',
-    });
+    await ElMessageBox.confirm(
+      t('sidebar.confirmDelete', { name: c.name }),
+      t('sidebar.confirmTitle'),
+      { type: 'warning' }
+    );
     conns.remove(c.id);
-    ElMessage.success('已删除');
+    ElMessage.success(t('sidebar.deleted'));
   } catch {
     /* user cancelled */
   }
@@ -158,23 +163,23 @@ function formatTime(ts: number): string {
   <div class="sidebar">
     <div class="tabs">
       <button :class="['tab', { active: activeTab === 'connections' }]" @click="activeTab = 'connections'">
-        🔌 连接
+        🔌 {{ t('sidebar.tabConnections') }}
       </button>
       <button :class="['tab', { active: activeTab === 'history' }]" @click="activeTab = 'history'">
-        🕘 历史 <span v-if="history.count.value" class="badge">{{ history.count.value }}</span>
+        🕘 {{ t('sidebar.tabHistory') }} <span v-if="history.count.value" class="badge">{{ history.count.value }}</span>
       </button>
     </div>
 
     <!-- 连接管理 + DB/Collection 浏览 -->
     <div v-if="activeTab === 'connections'" class="content">
       <div class="section-head">
-        <span class="section-title">连接</span>
-        <button class="mini-btn" @click="openAdd">+ 新增</button>
+        <span class="section-title">{{ t('sidebar.sectionConnections') }}</span>
+        <button class="mini-btn" @click="openAdd">{{ t('sidebar.add') }}</button>
       </div>
 
       <div v-if="conns.items.value.length === 0" class="empty">
-        <p>还没有连接</p>
-        <el-button type="primary" size="small" @click="openAdd">添加第一个连接</el-button>
+        <p>{{ t('sidebar.emptyConnections') }}</p>
+        <el-button type="primary" size="small" @click="openAdd">{{ t('sidebar.addFirst') }}</el-button>
       </div>
 
       <ul class="conn-list">
@@ -190,17 +195,17 @@ function formatTime(ts: number): string {
           </div>
           <div class="conn-uri" :title="c.uri">{{ c.uri }}</div>
           <div class="conn-actions" @click.stop>
-            <button class="link" @click="openEdit(c)">编辑</button>
-            <button class="link danger" @click="removeConnection(c)">删除</button>
+            <button class="link" @click="openEdit(c)">{{ t('sidebar.edit') }}</button>
+            <button class="link danger" @click="removeConnection(c)">{{ t('sidebar.remove') }}</button>
           </div>
         </li>
       </ul>
 
       <!-- DB / collection tree -->
       <div v-if="conns.active.value" class="section-head with-margin">
-        <span class="section-title">数据库 / 集合</span>
+        <span class="section-title">{{ t('sidebar.sectionDbCol') }}</span>
         <button class="mini-btn" :disabled="loadingDb" @click="refreshDatabases">
-          {{ loadingDb ? '加载中...' : '刷新' }}
+          {{ loadingDb ? t('sidebar.loading') : t('sidebar.refresh') }}
         </button>
       </div>
 
@@ -212,8 +217,8 @@ function formatTime(ts: number): string {
             <span v-if="d.sizeOnDisk" class="db-size">{{ Math.round(d.sizeOnDisk / 1024 / 1024) }}MB</span>
           </button>
           <ul v-if="expandedDb === d.name" class="col-list">
-            <li v-if="!collections[d.name]" class="loading-col">加载中...</li>
-            <li v-else-if="collections[d.name].length === 0" class="loading-col">(空)</li>
+            <li v-if="!collections[d.name]" class="loading-col">{{ t('sidebar.loading') }}</li>
+            <li v-else-if="collections[d.name].length === 0" class="loading-col">{{ t('sidebar.emptyDb') }}</li>
             <li
               v-for="col in collections[d.name]"
               :key="col.name"
@@ -233,13 +238,13 @@ function formatTime(ts: number): string {
     <!-- 历史记录 -->
     <div v-else class="content">
       <div class="section-head">
-        <span class="section-title">执行历史</span>
+        <span class="section-title">{{ t('sidebar.sectionHistory') }}</span>
         <button class="mini-btn" :disabled="!historyShown.length" @click="history.clear()">
-          清空
+          {{ t('sidebar.clearAll') }}
         </button>
       </div>
       <div v-if="historyShown.length === 0" class="empty">
-        <p>暂无历史</p>
+        <p>{{ t('sidebar.emptyHistory') }}</p>
       </div>
       <ul class="hist-list">
         <li
@@ -254,7 +259,7 @@ function formatTime(ts: number): string {
             <span :class="['hist-status', h.ok ? 'ok' : 'err']">{{ h.ok ? '✓' : '✗' }}</span>
             <span v-if="h.database" class="hist-db">{{ h.connectionName }}/{{ h.database }}</span>
             <span class="hist-time">{{ formatTime(h.timestamp) }}</span>
-            <span v-if="typeof h.count === 'number'" class="hist-count">{{ h.count }} docs</span>
+            <span v-if="typeof h.count === 'number'" class="hist-count">{{ t('result.docs', { n: h.count }) }}</span>
             <button class="fav" @click.stop="history.toggleFavorite(h.id)">
               {{ h.favorite ? '★' : '☆' }}
             </button>

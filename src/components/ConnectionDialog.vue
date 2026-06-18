@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useI18n } from 'vue-i18n';
 import type { MongoConnection } from '../composables/useConnections';
 import { listDatabases } from '../api/mongo';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   modelValue: boolean;
@@ -54,7 +57,7 @@ watch(
 
 async function testConnection() {
   if (!form.value.uri.trim()) {
-    ElMessage.warning('URI 不能为空');
+    ElMessage.warning(t('connDialog.needUriValue'));
     return;
   }
   testing.value = true;
@@ -62,12 +65,12 @@ async function testConnection() {
     const r = await listDatabases(form.value.uri.trim());
     if (r.ok) {
       const names = (r.databases || []).map((d) => d.name);
-      ElMessage.success(`连接成功，发现 ${names.length} 个数据库`);
+      ElMessage.success(t('connDialog.connectSuccess', { n: names.length }));
     } else {
-      ElMessage.error(`连接失败: ${r.error || '未知错误'}`);
+      ElMessage.error(t('connDialog.connectFailed', { error: r.error || '' }));
     }
   } catch (e: any) {
-    ElMessage.error(`连接失败: ${e?.message || String(e)}`);
+    ElMessage.error(t('connDialog.connectFailed', { error: e?.message || String(e) }));
   } finally {
     testing.value = false;
   }
@@ -77,11 +80,11 @@ function save() {
   const name = form.value.name.trim();
   const uri = form.value.uri.trim();
   if (!name) {
-    ElMessage.warning('请填写名称');
+    ElMessage.warning(t('connDialog.needName'));
     return;
   }
   if (!uri) {
-    ElMessage.warning('请填写 URI');
+    ElMessage.warning(t('connDialog.needUri'));
     return;
   }
   emit('save', {
@@ -97,35 +100,35 @@ function save() {
 <template>
   <el-dialog
     v-model="visible"
-    :title="isEdit ? '编辑连接' : '新增连接'"
+    :title="isEdit ? t('connDialog.editTitle') : t('connDialog.addTitle')"
     width="520px"
     align-center
     :close-on-click-modal="false"
   >
     <el-form label-position="top" :model="form">
-      <el-form-item label="名称" required>
-        <el-input v-model="form.name" placeholder="比如：本地 / 生产只读" />
+      <el-form-item :label="t('connDialog.name')" required>
+        <el-input v-model="form.name" :placeholder="t('connDialog.namePh')" />
       </el-form-item>
-      <el-form-item label="URI" required>
+      <el-form-item :label="t('connDialog.uri')" required>
         <el-input
           v-model="form.uri"
           type="textarea"
           :rows="2"
-          placeholder="mongodb://user:pass@host:27017/?authSource=admin"
+          :placeholder="t('connDialog.uriPh')"
           class="mono-input"
         />
-        <div class="hint">支持标准 URI / SRV：<code>mongodb+srv://user:pass@cluster.example.net/</code></div>
+        <div class="hint">{{ t('connDialog.uriHint') }}</div>
       </el-form-item>
-      <el-form-item label="默认数据库（可选）">
-        <el-input v-model="form.defaultDatabase" placeholder="留空则连接后再选" />
+      <el-form-item :label="t('connDialog.defaultDb')">
+        <el-input v-model="form.defaultDatabase" :placeholder="t('connDialog.defaultDbPh')" />
       </el-form-item>
     </el-form>
     <template #footer>
       <div class="footer">
-        <el-button :loading="testing" @click="testConnection">测试连接</el-button>
+        <el-button :loading="testing" @click="testConnection">{{ t('connDialog.test') }}</el-button>
         <div class="grow" />
-        <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" @click="save">{{ isEdit ? '保存' : '新增' }}</el-button>
+        <el-button @click="visible = false">{{ t('connDialog.cancel') }}</el-button>
+        <el-button type="primary" @click="save">{{ isEdit ? t('connDialog.save') : t('connDialog.add') }}</el-button>
       </div>
     </template>
   </el-dialog>

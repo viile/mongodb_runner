@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { chatWithLLM, generateMongoCommand, getLLMStatus, type LLMSchema } from '../api/llm';
 import { sampleDocuments } from '../api/mongo';
-import { useChat, extractCommand } from '../composables/useChat';
+import { useChat } from '../composables/useChat';
 
 const props = defineProps<{
   uri: string | null;
@@ -42,11 +42,11 @@ onMounted(async () => {
       if (oai) llmInfo.value = `OpenAI · ${oai.model}`;
       else if (cur) llmInfo.value = `cursor-agent · ${cur.model || 'default'}`;
     } else {
-      llmInfo.value = '未配置 LLM。请编辑 .mongo-runner.env';
+      llmInfo.value = '未配置 LLM。设置 OPENAI_API_KEY 后重启即可启用';
     }
   } catch {
     llmAvailable.value = false;
-    llmInfo.value = '后端未启动';
+    llmInfo.value = '无法读取 LLM 状态';
   }
   scrollToBottom();
 });
