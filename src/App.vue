@@ -25,12 +25,12 @@ const currentCollection = ref<string | null>(null);
  * 就同步切到新语言；只要用户改过任何字符，就尊重用户输入，不再覆盖。
  */
 const command = ref<string>(t('editor.placeholder'));
-let lastPlaceholder = command.value;
+const lastPlaceholder = ref<string>(command.value);
 watch(
   () => t('editor.placeholder'),
   (next) => {
-    if (command.value === lastPlaceholder) command.value = next;
-    lastPlaceholder = next;
+    if (command.value === lastPlaceholder.value) command.value = next;
+    lastPlaceholder.value = next;
   }
 );
 const loading = ref(false);
@@ -278,6 +278,10 @@ async function handleRunGenerated(cmd: string) {
             :database="currentDatabase"
             :collection="currentCollection"
             :uri="conns.active.value?.uri || null"
+            :connection-name="conns.active.value?.name || null"
+            :current-command="command"
+            :placeholder-command="lastPlaceholder"
+            :last-result="result"
             @use-command="handleUseGenerated"
             @run-command="handleRunGenerated"
           />

@@ -7,9 +7,10 @@
 //!   mongo_sample_documents(uri, database, col, size) -> { ok, docs }
 //!   mongo_execute(uri, database, command, limit?)    -> ExecuteResult (EJSON relaxed)
 //!
-//!   llm_status()                                    -> { ok, available, providers }
-//!   llm_generate(prompt, schema?)                    -> { ok, command, provider, model }
-//!   llm_chat(messages, schema?)                      -> { ok, reply, provider, model }
+//!   llm_status(profile?)                            -> { ok, available, providers|active }
+//!   llm_generate(prompt, schema?, profile?)          -> { ok, command, provider, model }
+//!   llm_chat(messages, schema?, profile?)            -> { ok, reply, provider, model }
+//!   llm_detect_local()                              -> { ok, envFiles, envSnapshot, openai, cursor }
 
 mod env_loader;
 mod llm;
@@ -43,6 +44,7 @@ pub fn run() {
             llm::llm_status,
             llm::llm_generate,
             llm::llm_chat,
+            llm::llm_detect_local,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

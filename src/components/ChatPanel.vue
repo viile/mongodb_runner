@@ -2,16 +2,31 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useI18n } from 'vue-i18n';
-import { chatWithLLM, generateMongoCommand, getLLMStatus, type LLMSchema } from '../api/llm';
-import { sampleDocuments } from '../api/mongo';
+import {
+  chatWithLLM,
+  generateMongoCommand,
+  getLLMStatus,
+  type LLMSchema,
+  type LLMResultPreview,
+} from '../api/llm';
+import { sampleDocuments, type ExecuteResult } from '../api/mongo';
 import { useChat } from '../composables/useChat';
+import { useLLMProfiles } from '../composables/useLLMProfiles';
 
 const { t } = useI18n();
+const llm = useLLMProfiles();
 
 const props = defineProps<{
   uri: string | null;
   database: string | null;
   collection: string | null;
+  connectionName?: string | null;
+  /** 编辑器当前内容（包含占位注释时也会进来） */
+  currentCommand?: string | null;
+  /** App.vue 里 i18n 占位文本，用来判断是不是「用户还没动过编辑器」 */
+  placeholderCommand?: string | null;
+  /** 上一次执行结果（包含 error / data 等） */
+  lastResult?: ExecuteResult | null;
 }>();
 
 const emit = defineEmits<{
@@ -23,32 +38,69 @@ const chat = useChat();
 const input = ref('');
 const loading = ref(false);
 const includeSample = ref(true);
+const includeCommand = ref(true);
+const includeResult = ref(true);
 const llmAvailable = ref<boolean | null>(null);
 const llmInfo = ref<string>('');
+
+/** 上一次结果是否值得作为上下文（成功有 data 或失败有 error 都算） */
+const hasMeaningfulResult = computed(() => {
+  const r = props.lastResult;
+  if (!r) return false;
+  if (r.ok) return r.data !== undefined && r.data !== null;
+  return !!r.error;
+});
+
+/** 编辑器里有没有用户实际输入的内容（去掉初始 placeholder / 注释） */
+const hasUserCommand = computed(() => {
+  const c = (props.currentCommand ?? '').trim();
+  if (!c) return false;
+  if (props.placeholderCommand && c === props.placeholderCommand.trim()) return false;
+  return true;
+});
 
 const scrollAreaRef = ref<HTMLElement | null>(null);
 
 const QUICK_PROMPT_KEYS = ['chat.quick1', 'chat.quick2', 'chat.quick3', 'chat.quick4'] as const;
 const quickPrompts = computed(() => QUICK_PROMPT_KEYS.map((k) => t(k)));
 
-onMounted(async () => {
+async function refreshStatus() {
   try {
-    const r = await getLLMStatus();
+    const r = await getLLMStatus(llm.active.value);
     llmAvailable.value = r.available;
     if (r.available) {
-      const oai = r.providers?.openai;
-      const cur = r.providers?.cursor;
-      if (oai) llmInfo.value = `OpenAI · ${oai.model}`;
-      else if (cur) llmInfo.value = `cursor-agent · ${cur.model || 'default'}`;
+      // 有 active profile 时优先显示 profile 名；fallback 显示 env 检测出的 provider
+      if (llm.active.value) {
+        const p = llm.active.value;
+        const tag = p.providerKind === 'cursor' ? 'cursor-agent' : p.model || 'openai';
+        llmInfo.value = `${p.name} · ${tag}`;
+      } else {
+        const oai = r.providers?.openai;
+        const cur = r.providers?.cursor;
+        if (oai) llmInfo.value = `OpenAI · ${oai.model}`;
+        else if (cur) llmInfo.value = `cursor-agent · ${cur.model || 'default'}`;
+      }
     } else {
-      llmInfo.value = t('chat.statusNotConfigured');
+      llmInfo.value = r.error || t('chat.statusNotConfigured');
     }
   } catch {
     llmAvailable.value = false;
     llmInfo.value = t('chat.statusCantRead');
   }
+}
+
+onMounted(async () => {
+  await refreshStatus();
   scrollToBottom();
 });
+
+// active profile 切换时同步刷状态
+watch(
+  () => llm.active.value?.id,
+  () => {
+    refreshStatus();
+  }
+);
 
 watch(
   () => chat.messages.value.length,
@@ -62,13 +114,62 @@ function scrollToBottom() {
   });
 }
 
-async function buildSchema(): Promise<LLMSchema | undefined> {
-  if (!props.database) return undefined;
-  const schema: LLMSchema = {
-    database: props.database,
-    collection: props.collection,
+/** 把 result.data 序列化成 LLM 看的 preview（控制大小） */
+function buildResultPreview(r: ExecuteResult): LLMResultPreview {
+  const PREVIEW_MAX_CHARS = 3000;
+  const PREVIEW_MAX_DOCS = 5;
+  let previewJson: string | null = null;
+  if (r.ok && r.data !== undefined && r.data !== null) {
+    try {
+      let payload: unknown = r.data;
+      // 文档列表：取头几条避免 prompt 爆
+      if (Array.isArray(payload) && payload.length > PREVIEW_MAX_DOCS) {
+        payload = payload.slice(0, PREVIEW_MAX_DOCS);
+      }
+      let s = JSON.stringify(payload, null, 2);
+      if (s.length > PREVIEW_MAX_CHARS) {
+        s = s.slice(0, PREVIEW_MAX_CHARS) + `\n... (truncated, original ${s.length} chars)`;
+      }
+      previewJson = s;
+    } catch {
+      previewJson = '[unserializable]';
+    }
+  }
+  return {
+    ok: r.ok,
+    kind: r.kind ?? null,
+    operation: r.operation ?? null,
+    count: typeof r.count === 'number' ? r.count : null,
+    elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : null,
+    truncated: r.truncated ?? null,
+    error: r.error ?? null,
+    previewJson,
   };
-  if (includeSample.value && props.uri && props.collection) {
+}
+
+/** 把编辑器命令裁到一个合理上限，避免动辄上千行的 paste 把上下文吃光 */
+function trimCommand(input: string): string {
+  const MAX = 2000;
+  const trimmed = input.trim();
+  if (trimmed.length <= MAX) return trimmed;
+  return trimmed.slice(0, MAX) + `\n... (truncated, original ${trimmed.length} chars)`;
+}
+
+async function buildSchema(): Promise<LLMSchema | undefined> {
+  // 哪怕没选 db，连接名 / 命令 / 上一次结果也能给 LLM 提供有用上下文
+  const schema: LLMSchema = {};
+  if (props.connectionName) schema.connectionName = props.connectionName;
+  if (props.database) schema.database = props.database;
+  if (props.collection) schema.collection = props.collection;
+
+  if (includeCommand.value && hasUserCommand.value) {
+    schema.currentCommand = trimCommand(props.currentCommand!);
+  }
+  if (includeResult.value && hasMeaningfulResult.value && props.lastResult) {
+    schema.lastResult = buildResultPreview(props.lastResult);
+  }
+
+  if (includeSample.value && props.uri && props.database && props.collection) {
     try {
       const r = await sampleDocuments(props.uri, props.database, props.collection, 2);
       if (r.ok && Array.isArray(r.docs)) {
@@ -78,7 +179,10 @@ async function buildSchema(): Promise<LLMSchema | undefined> {
       /* sample 失败不阻塞 */
     }
   }
-  return schema;
+
+  // 没有任何字段就当 undefined，让 Rust 走「无 schema 提示」分支
+  const hasAny = Object.keys(schema).length > 0;
+  return hasAny ? schema : undefined;
 }
 
 async function sendMessage(rawInput?: string) {
@@ -93,7 +197,7 @@ async function sendMessage(rawInput?: string) {
     const history = chat.messages.value
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    const r = await chatWithLLM(history, schema);
+    const r = await chatWithLLM(history, schema, llm.active.value);
     if (r.ok && r.reply) {
       chat.addAssistant(r.reply);
     } else {
@@ -122,7 +226,7 @@ async function generateFromPrompt() {
   loading.value = true;
   try {
     const schema = await buildSchema();
-    const r = await generateMongoCommand(text, schema);
+    const r = await generateMongoCommand(text, schema, llm.active.value);
     if (r.ok && r.command) {
       chat.addAssistant(`${t('chat.generated')}\n\n\`\`\`js\n${r.command}\n\`\`\``);
     } else {
@@ -226,6 +330,14 @@ function renderContent(text: string): string {
         <label class="opt">
           <input v-model="includeSample" type="checkbox" />
           {{ t('chat.optSampleSchema') }}
+        </label>
+        <label class="opt" :title="t('chat.optIncludeCommandTitle')">
+          <input v-model="includeCommand" type="checkbox" :disabled="!hasUserCommand" />
+          {{ t('chat.optIncludeCommand') }}
+        </label>
+        <label class="opt" :title="t('chat.optIncludeResultTitle')">
+          <input v-model="includeResult" type="checkbox" :disabled="!hasMeaningfulResult" />
+          {{ t('chat.optIncludeResult') }}
         </label>
       </div>
       <textarea

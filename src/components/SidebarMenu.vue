@@ -3,11 +3,14 @@ import { computed, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useI18n } from 'vue-i18n';
 import ConnectionDialog from './ConnectionDialog.vue';
+import LLMConfig from './LLMConfig.vue';
 import { useConnections, type MongoConnection } from '../composables/useConnections';
 import { useHistory, type HistoryItem } from '../composables/useHistory';
+import { useLLMProfiles } from '../composables/useLLMProfiles';
 import { listCollections, listDatabases, type MongoCollection, type MongoDatabase } from '../api/mongo';
 
 const { t } = useI18n();
+const llmProfiles = useLLMProfiles();
 
 const props = defineProps<{
   currentDatabase: string | null;
@@ -23,7 +26,7 @@ const emit = defineEmits<{
 const conns = useConnections();
 const history = useHistory();
 
-type TabKey = 'connections' | 'history';
+type TabKey = 'connections' | 'history' | 'llm';
 const activeTab = ref<TabKey>('connections');
 
 const dialogVisible = ref(false);
@@ -174,6 +177,10 @@ function formatTime(ts: number): string {
       <button :class="['tab', { active: activeTab === 'history' }]" @click="activeTab = 'history'">
         🕘 {{ t('sidebar.tabHistory') }} <span v-if="history.count.value" class="badge">{{ history.count.value }}</span>
       </button>
+      <button :class="['tab', { active: activeTab === 'llm' }]" @click="activeTab = 'llm'">
+        🤖 {{ t('sidebar.tabLLM') }}
+        <span v-if="llmProfiles.count.value" class="badge">{{ llmProfiles.count.value }}</span>
+      </button>
     </div>
 
     <!-- 连接管理 + DB/Collection 浏览 -->
@@ -242,7 +249,7 @@ function formatTime(ts: number): string {
     </div>
 
     <!-- 历史记录 -->
-    <div v-else class="content">
+    <div v-else-if="activeTab === 'history'" class="content">
       <div class="section-head">
         <span class="section-title">{{ t('sidebar.sectionHistory') }}</span>
         <button class="mini-btn" :disabled="!historyShown.length" @click="history.clear()">
@@ -273,6 +280,9 @@ function formatTime(ts: number): string {
         </li>
       </ul>
     </div>
+
+    <!-- LLM API 配置 -->
+    <LLMConfig v-else-if="activeTab === 'llm'" />
 
     <ConnectionDialog
       v-model="dialogVisible"
